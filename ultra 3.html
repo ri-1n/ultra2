@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>投資AI Pro MAX AUTO UPGRADE</title>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+
+body{
+  background:#0f172a;
+  color:#e5e7eb;
+  font-family:sans-serif;
+  max-width:900px;
+  margin:auto;
+  padding:15px;
+}
+
+h1{text-align:center;}
+
+.card{
+  background:#1e293b;
+  padding:15px;
+  margin:15px 0;
+  border-radius:12px;
+}
+
+input,button{
+  width:100%;
+  padding:10px;
+  margin-top:8px;
+  border:none;
+  border-radius:8px;
+}
+
+button{
+  background:#2563eb;
+  color:white;
+}
+
+.resultBox{
+  padding:15px;
+  border-radius:10px;
+  font-size:22px;
+  font-weight:bold;
+  text-align:center;
+}
+
+.buy{background:#065f46;}
+.wait{background:#78350f;}
+.avoid{background:#7f1d1d;}
+
+.techBox{
+  background:#0f172a;
+  padding:15px;
+  border-radius:10px;
+  line-height:1.7;
+}
+
+canvas{
+  background:white;
+  border-radius:10px;
+  margin-top:20px;
+}
+
+.loading{
+  text-align:center;
+  color:#60a5fa;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<h1>📊 投資AI Pro MAX AUTO UPGRADE</h1>
+
+<div class="card">
+
+<input id="symbol" placeholder="例：AAPL / TSLA / 7203.T / 7203">
+
+<button onclick="loadStockData()">📡 分析スタート</button>
+
+<div class="loading" id="loading"></div>
+
+</div>
+
+<div class="card">
+<h3>📈 シグナル</h3>
+<div id="result"></div>
+</div>
+
+<div class="card">
+<h3>📊 テクニカル</h3>
+<div id="technical"></div>
+</div>
+
+<div class="card">
+<h3>📉 チャート</h3>
+<canvas id="chart"></canvas>
+</div>
+
+<script>
+
+const API_KEY = "DMGHXI6KUTIWF9UO";
+let chart;
+
+// =====================
+// データ取得
+// =====================
+async function loadStockData(){
+
+  let symbol =
+    document.getElementById("symbol").value.trim();
+
+  if(!symbol){
+    alert("銘柄コードを入力してください");
+    return;
+  }
+
+  document.getElementById("loading").innerHTML =
+    "📡 取得中...";
+
+  try{
+
+    let {dates,prices,volumes} =
+      await fetchStock(symbol);
+
+    let currentPrice =
+      prices[prices.length-1];
+
+    analyze(prices,volumes,currentPrice);
+    drawChart(dates,prices);
+
+    document.getElementById("loading").innerHTML =
+      "✅ 完了";
+
+  }catch(e){
+    console.log(e);
+    alert("取得エラー");
+  }
+}
+
+// =====================
+// Yahoo + Alpha対応
+// =====================
+async function fetchStock(symbol){
+
+  let isJP =
+    /^\d+$/.test(symbol) || symbol.endsWith(".T");
+
+  // 🇯🇵 Yahoo Finance
+  if(isJP){
+
+    if(/^\d+$/.test(symbol)){
+      symbol += ".T";
+    }
+
+    let url =
+      `https://query1.finance.yahoo.com/v7/finance/chart/${symbol}?range=1mo&interval=1d`;
+
+    let res = await fetch(url);
+    let data = await res.json();
+
+    let r = data.chart.result?.[0];
+
+    if(!r) throw new Error("Yahoo失敗");
+
+    return {
+      dates: r.timestamp.map(t =>
+        new Date(t*1000).toISOString().split("T")[0]
+      ),
+      prices: r.indicators.quote[0].close.map(Number),
+      volumes: r.indicators.quote[0].volume.map(Number)
+    };
+  }
+
+  // 🇺🇸 Alpha Vantage
+  let url =
+    `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${symbol}&outputsize=compact&apikey=${API_KEY}`;
+
+  let res = await fetch(url);
+  let data = await res.json();
+
+  let s = data["Time Series (Daily)"];
+
+  if(!s) throw new Error("Alpha失敗");
+
+  let dates = Object.keys(s).slice(0,25).reverse();
+
+  return {
+    dates,
+    prices: dates.map(d => Number(s[d]["4. close"])),
+    volumes: dates.map(d => Number(s[d]["5. volume"]))
+  };
+}
+
+// =====================
+// 相場環境判定
+// =====================
+function getMarketRegime(prices){
+
+  let ma5 = prices.slice(-5).reduce((a,b)=>a+b)/5;
+  let ma10 = prices.slice(-10).reduce((a,b)=>a+b)/10;
+  let ma25 = prices.slice(-25).reduce((a,b)=>a+b)/prices.length;
+
+  if(ma5 > ma10 && ma10 > ma25) return "UPTREND";
+  if(ma5 < ma10 && ma10 < ma25) return "DOWNTREND";
+  return "RANGE";
+}
+
+// =====================
+// RSI
+// =====================
+function calcRSI(prices){
+
+  let g=0,l=0;
+
+  for(let i=1;i<prices.length;i++){
+    let d = prices[i]-prices[i-1];
+    if(d>0) g+=d;
+    else l+=Math.abs(d);
+  }
+
+  let rs = g/(l||1);
+  return 100-(100/(1+rs));
+}
+
+// =====================
+// メイン分析
+// =====================
+function analyze(prices,volumes,currentPrice){
+
+  let ma5 = prices.slice(-5).reduce((a,b)=>a+b)/5;
+  let ma10 = prices.slice(-10).reduce((a,b)=>a+b)/10;
+
+  let rsi = calcRSI(prices);
+
+  let ema12 = prices.slice(-12).reduce((a,b)=>a+b)/12;
+  let ema26 = prices.slice(-26).reduce((a,b)=>a+b)/26;
+
+  let macd = ema12-ema26;
+  let signal = macd*0.8;
+
+  let cross = ma5>ma10;
+
+  let regime = getMarketRegime(prices);
+
+  // =====================
+  // シグナル
+  // =====================
+  let signalType="HOLD";
+
+  let buy =
+    (regime==="UPTREND" && macd>signal && cross) ||
+    (regime==="RANGE" && rsi<30);
+
+  let sell =
+    (rsi>70) || (macd<signal && regime==="DOWNTREND");
+
+  if(buy) signalType="BUY";
+  else if(sell) signalType="SELL";
+
+  // =====================
+  // 勝率シミュレーション
+  // =====================
+  let win=0,trades=0;
+
+  for(let i=30;i<prices.length;i++){
+    let slice = prices.slice(i-30,i);
+    let r = calcRSI(slice);
+
+    if(r<35){
+      trades++;
+      if(prices[i]>prices[i-1]) win++;
+    }
+  }
+
+  let winRate = trades?((win/trades)*100).toFixed(1):0;
+
+  // =====================
+  // 表示
+  // =====================
+  document.getElementById("result").innerHTML=
+  `
+  <div class="resultBox ${
+    signalType==="BUY"?"buy":
+    signalType==="SELL"?"avoid":"wait"
+  }">
+    ${signalType}
+  </div>
+
+  <div class="techBox">
+    💰 現在価格：${currentPrice.toFixed(2)}<br>
+    📊 相場：${regime}<br>
+    📊 RSI：${rsi.toFixed(1)}<br>
+    📊 勝率(簡易)：${winRate}%<br>
+  </div>
+  `;
+
+  document.getElementById("technical").innerHTML=
+  `
+  <div class="techBox">
+    MA5：${ma5.toFixed(2)}<br>
+    MA10：${ma10.toFixed(2)}<br>
+    MACD：${macd.toFixed(2)}<br>
+    Signal：${signal.toFixed(2)}<br>
+    クロス：${cross?"上昇":"下降"}<br>
+  </div>
+  `;
+}
+
+// =====================
+// チャート
+// =====================
+function drawChart(labels,prices){
+
+  let ctx=document.getElementById("chart");
+
+  if(chart) chart.destroy();
+
+  chart=new Chart(ctx,{
+    type:"line",
+    data:{
+      labels,
+      datasets:[{
+        data:prices,
+        borderColor:"#60a5fa",
+        fill:true,
+        tension:0.3
+      }]
+    }
+  });
+}
+
+</script>
+
+</body>
+</html>
